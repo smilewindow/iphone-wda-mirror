@@ -46,7 +46,6 @@ def wda_status():
     d = r.json()
     return d.get("value", d)
 
-print("WDA /status:", json.dumps(wda_status(), ensure_ascii=False))
 
 # ---------- 解锁检测 ----------
 def is_locked():
@@ -104,15 +103,8 @@ def ensure_session():
             time.sleep(1.0)
             return c.session()
 
-s = ensure_session()
-
-# 设备“点(pt)”尺寸
-sz = s.window_size()
-if isinstance(sz, tuple):
-    device_w, device_h = float(sz[0]), float(sz[1])
-else:
-    device_w, device_h = float(sz["width"]), float(sz["height"])
-print(f"Device window size (pt): {device_w} x {device_h}")
+s = None
+device_w = device_h = 0.0
 
 # ===================== 坐标映射：截图(px) -> 画布(px) -> 设备(pt) =====================
 shot_w = shot_h = 0
@@ -357,8 +349,6 @@ def on_mouse(event, x, y, flags, param):
         print(f"[plan] SWIPE dur={dur:.3f}s dpt={move_pt:.1f}")
 
 # ===================== UI 展示 =====================
-cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_AUTOSIZE)
-cv2.setMouseCallback(WINDOW_TITLE, on_mouse)
 
 def draw(img):
     global shot_w, shot_h, canvas_w, canvas_h, scale, offset_x, offset_y
@@ -385,20 +375,35 @@ def draw(img):
     cv2.imshow(WINDOW_TITLE, canvas)
 
 # ===================== 主循环 =====================
-try:
-    start_capture_thread()
-    while True:
-        frame = None
-        with FRAME_LOCK:
-            if LATEST_FRAME is not None:
-                frame = LATEST_FRAME.copy()
-        if frame is not None:
-            draw(frame)
-        key = cv2.waitKey(1) & 0xFF
-        if key in (27, ord('q')):
-            break
-finally:
-    STOP_EVENT.set()
-    EXEC.shutdown(wait=False)
-    cv2.destroyAllWindows()
+def main():
+    global s, device_w, device_h
+    print("WDA /status:", json.dumps(wda_status(), ensure_ascii=False))
+    s = ensure_session()
+    sz = s.window_size()
+    if isinstance(sz, tuple):
+        device_w, device_h = float(sz[0]), float(sz[1])
+    else:
+        device_w, device_h = float(sz["width"]), float(sz["height"])
+    print(f"Device window size (pt): {device_w} x {device_h}")
+    cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_AUTOSIZE)
+    cv2.setMouseCallback(WINDOW_TITLE, on_mouse)
+    try:
+        start_capture_thread()
+        while True:
+            frame = None
+            with FRAME_LOCK:
+                if LATEST_FRAME is not None:
+                    frame = LATEST_FRAME.copy()
+            if frame is not None:
+                draw(frame)
+            key = cv2.waitKey(1) & 0xFF
+            if key in (27, ord('q')):
+                break
+    finally:
+        STOP_EVENT.set()
+        EXEC.shutdown(wait=False)
+        cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
 

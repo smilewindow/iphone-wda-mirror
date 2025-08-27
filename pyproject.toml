@@ -1,0 +1,16 @@
+[project]
+name = "iphone-wda-mirror"
+version = "0.1.0"
+description = "Mirror iPhone screen via WebDriverAgent and control with mouse"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "requests",
+    "opencv-python",
+    "numpy",
+    "python-wda",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
