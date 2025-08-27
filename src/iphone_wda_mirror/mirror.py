@@ -4,7 +4,8 @@
 # 连接：USB 请先运行 `iproxy 8100 8100`；或将 WDA_URL 改为 http://<设备IP>:8100
 
 import time, math, json, base64, threading
-import requests, cv2, numpy as np, wda
+import requests, cv2, numpy as np
+from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor
 
 # ===================== 配置 =====================
@@ -38,7 +39,48 @@ S_IMG.headers.update({"Connection": "keep-alive"})
 S_CMD = requests.Session()
 S_CMD.headers.update({"Connection": "keep-alive"})
 
-c = wda.Client(WDA_URL)
+
+class WDASession:
+    def __init__(self, sid):
+        self.id = self.session_id = self._session_id = sid
+
+    def _url(self, path):
+        return f"{WDA_URL}/session/{self.session_id}{path}"
+
+    def tap(self, x, y):
+        S_CMD.post(self._url("/wda/tap"), json={"x": x, "y": y}, timeout=TIMEOUT_CMD).raise_for_status()
+
+    def swipe(self, x0, y0, x1, y1, duration=0):
+        self.drag(x0, y0, x1, y1, duration)
+
+    def drag(self, x0, y0, x1, y1, duration):
+        p = {"fromX": x0, "fromY": y0, "toX": x1, "toY": y1, "duration": float(duration)}
+        S_CMD.post(self._url("/wda/dragfromtoforduration"), json=p, timeout=max(TIMEOUT_CMD, 6)).raise_for_status()
+
+    def window_size(self):
+        r = S_CMD.get(self._url("/window/size"), timeout=TIMEOUT_CMD)
+        r.raise_for_status()
+        v = r.json().get("value", r.json())
+        Size = namedtuple('Size', ['width', 'height'])
+        return Size(v['width'], v['height'])
+
+
+def create_session(bundle_id=None):
+    caps = {}
+    if bundle_id:
+        caps["bundleId"] = bundle_id
+    payload = {
+        "capabilities": {"alwaysMatch": caps, "firstMatch": [{}]},
+        "desiredCapabilities": caps,
+    }
+    r = S_CMD.post(f"{WDA_URL}/session", json=payload, timeout=max(TIMEOUT_CMD, 6))
+    r.raise_for_status()
+    d = r.json()
+    value = d.get("value", {})
+    sid = d.get("sessionId") or value.get("sessionId") or value
+    if not isinstance(sid, str):
+        raise RuntimeError(f"invalid session response: {d}")
+    return WDASession(sid)
 
 def wda_status():
     r = S_CMD.get(f"{WDA_URL}/status", timeout=TIMEOUT_CMD)
@@ -75,7 +117,7 @@ def ensure_session():
     """
     更稳会话策略：
     1) 先等解锁
-    2) 优先附着 TARGET_BUNDLE；否则跟随前台 App
+    2) 尝试附着 TARGET_BUNDLE；否则跟随前台 App
     3) 若前台是 SpringBoard，不带 bundleId，走默认 session（避免 RequestDenied）
     """
     with SESS_LOCK:
@@ -84,24 +126,17 @@ def ensure_session():
                 print("⏳ 等待解锁超时，仍尝试创建默认会话 ...")
 
             bid = TARGET_BUNDLE
-            if not bid:
-                try:
-                    cur = c.app_current() or {}
-                    bid = cur.get("bundleId")
-                except Exception:
-                    bid = None
-
             if bid and bid != "com.apple.springboard":
                 print("Attach session to:", bid)
-                return c.session(bid)
+                return create_session(bid)
             else:
                 print("Attach session to: (frontmost)")
-                return c.session()
+                return create_session()
         except Exception as e:
             print("ensure_session error:", repr(e))
             # 刚解锁后短时不可用，稍微等待后再试一次默认会话
             time.sleep(1.0)
-            return c.session()
+            return create_session()
 
 s = None
 device_w = device_h = 0.0
