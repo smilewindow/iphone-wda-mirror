@@ -201,25 +201,46 @@ LATEST_FRAME = None
 FRAME_LOCK = threading.Lock()
 STOP_EVENT = threading.Event()
 
+
 def capture_mjpeg():
     url = f"{WDA_URL}/mjpegstream"
-    cap = cv2.VideoCapture(url)
-    if not cap.isOpened():
-        return False
     try:
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        r = S_IMG.get(url, stream=True, timeout=TIMEOUT_IMG)
+        r.raise_for_status()
     except Exception:
-        pass
-    while not STOP_EVENT.is_set():
-        ok, frame = cap.read()
-        if not ok:
-            break
-        ih, iw = frame.shape[:2]
-        with FRAME_LOCK:
-            global LATEST_FRAME, shot_w, shot_h
-            LATEST_FRAME = frame
-            shot_w, shot_h = iw, ih
-    cap.release()
+        return False
+
+    buf = bytearray()
+    try:
+        for chunk in r.iter_content(chunk_size=4096):
+            if STOP_EVENT.is_set():
+                break
+            if not chunk:
+                continue
+            buf.extend(chunk)
+            while True:
+                a = buf.find(b"\xff\xd8")
+                b = buf.find(b"\xff\xd9")
+                if a != -1 and b != -1 and b > a:
+                    jpg = buf[a:b + 2]
+                    del buf[:b + 2]
+                    arr = np.frombuffer(jpg, np.uint8)
+                    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                    if img is None:
+                        continue
+                    ih, iw = img.shape[:2]
+                    with FRAME_LOCK:
+                        global LATEST_FRAME, shot_w, shot_h
+                        LATEST_FRAME = img
+                        shot_w, shot_h = iw, ih
+                else:
+                    if a != -1:
+                        del buf[:a]
+                    else:
+                        buf.clear()
+                    break
+    finally:
+        r.close()
     return True
 
 def capture_polling():
