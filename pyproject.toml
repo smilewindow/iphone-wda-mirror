@@ -8,7 +8,7 @@ dependencies = [
     "requests",
     "opencv-python",
     "numpy",
-    "python-wda",
+    "wda",
 ]
 
 [build-system]
