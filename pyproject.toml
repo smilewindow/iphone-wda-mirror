@@ -9,6 +9,7 @@ dependencies = [
     "opencv-python",
     "numpy",
     "wda",
+    "six",
 ]
 
 [build-system]
